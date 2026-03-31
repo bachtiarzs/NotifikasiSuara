@@ -1,0 +1,9 @@
+<resources>
+    <style name="Base.Theme.NotifikasiSuara" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/primary</item>
+        <item name="colorPrimaryVariant">@color/purple_700</item>
+        <item name="colorOnPrimary">@color/white</item>
+    </style>
+
+    <style name="Theme.NotifikasiSuara" parent="Base.Theme.NotifikasiSuara" />
+</resources>
