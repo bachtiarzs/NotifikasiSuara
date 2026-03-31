@@ -23,7 +23,7 @@ class NotificationReaderService : NotificationListenerService() {
         private const val CHANNEL_ID = "notif_reader_channel"
         private const val NOTIF_ID = 1
 
-        // Daftar aplikasi yang ingin dibaca notifikasinya
+        // Daftar package GoPay Merchant yang dipantau
         val TARGET_APPS = mutableSetOf(
             "com.gojek.gopay.merchant",
             "id.gojek.app",
@@ -56,16 +56,13 @@ class NotificationReaderService : NotificationListenerService() {
     private fun initTts() {
         tts = TextToSpeech(this) { status ->
             if (status == TextToSpeech.SUCCESS) {
-                // Coba gunakan bahasa Indonesia untuk suara lebih natural
                 val result = tts?.setLanguage(Locale("id", "ID"))
                 if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
                     tts?.setLanguage(Locale.US)
                 }
-
-                // Tuning TTS agar tidak kaku seperti robot
-                tts?.setSpeechRate(0.88f)   // Lebih lambat sedikit = lebih natural
-                tts?.setPitch(1.05f)         // Sedikit lebih tinggi = lebih ekspresif
-
+                // TTS natural, tidak kaku
+                tts?.setSpeechRate(0.88f)
+                tts?.setPitch(1.05f)
                 tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                     override fun onStart(utteranceId: String?) {}
                     override fun onDone(utteranceId: String?) {
@@ -77,7 +74,6 @@ class NotificationReaderService : NotificationListenerService() {
                         processQueue()
                     }
                 })
-
                 ttsReady = true
                 Log.d(TAG, "TTS siap")
                 processQueue()
@@ -94,63 +90,58 @@ class NotificationReaderService : NotificationListenerService() {
 
         val pkg = sbn.packageName ?: return
 
-        // Cek apakah paket ada di daftar target
+        // Cek apakah paket adalah GoPay Merchant
         val isTarget = TARGET_APPS.any { pkg.contains(it, ignoreCase = true) } ||
             pkg.contains("gopay", ignoreCase = true) ||
             pkg.contains("gojek", ignoreCase = true)
-
         if (!isTarget) return
 
         val extras = sbn.notification.extras ?: return
         val title = extras.getString(Notification.EXTRA_TITLE) ?: ""
         val text = extras.getString(Notification.EXTRA_TEXT) ?: ""
         val bigText = extras.getString(Notification.EXTRA_BIG_TEXT) ?: text
+        val fullText = bigText.ifBlank { text }
 
-        Log.d(TAG, "Notifikasi dari: $pkg | $title | $text")
+        Log.d(TAG, "Notifikasi dari: $pkg | $title | $fullText")
 
-        if (title.isBlank() && text.isBlank()) return
-
-        val speechText = buildNaturalSpeech(pkg, title, bigText.ifBlank { text })
-        enqueueSpeak(speechText)
+        // Ekstrak nominal dari notifikasi dan buat kalimat custom
+        val speechText = buildPaymentSpeech(title, fullText)
+        if (speechText.isNotBlank()) {
+            enqueueSpeak(speechText)
+        }
     }
 
-    private fun buildNaturalSpeech(pkg: String, title: String, text: String): String {
-        // Bersihkan teks dari karakter aneh
-        val cleanTitle = cleanText(title)
-        val cleanText = cleanText(text)
+    /**
+     * Mengekstrak nominal pembayaran dari teks notifikasi GoPay Merchant.
+     * Format output: "Terimakasih, Pembayaran sejumlah [nominal dalam kata] telah diterima"
+     * Jika nominal tidak ditemukan, tidak membaca apapun (return blank).
+     */
+    private fun buildPaymentSpeech(title: String, text: String): String {
+        val combined = "$title $text"
 
-        // Deteksi nominal uang dan format dengan lebih natural
-        val processedText = formatCurrencyNatural(cleanText)
+        // Pola untuk mendeteksi nominal: Rp 50.000 / Rp50000 / Rp 50,000 / IDR 50000
+        val patterns = listOf(
+            Pattern.compile("(?:Rp\\.?|IDR)[\\s]?([\\d][\\d.,]*)", Pattern.CASE_INSENSITIVE),
+            Pattern.compile("([\\d][\\d.,]+)\\s*(?:rupiah)", Pattern.CASE_INSENSITIVE)
+        )
 
-        return when {
-            cleanTitle.isNotBlank() && processedText.isNotBlank() -> {
-                "$cleanTitle. $processedText"
+        for (pattern in patterns) {
+            val matcher = pattern.matcher(combined)
+            if (matcher.find()) {
+                val numStr = matcher.group(1)
+                    ?.replace(".", "")
+                    ?.replace(",", "")
+                    ?.trim() ?: continue
+                val num = numStr.toLongOrNull() ?: continue
+                if (num <= 0) continue
+
+                val nominalKata = numberToWords(num) + " rupiah"
+                return "Terimakasih, Pembayaran sejumlah $nominalKata telah diterima"
             }
-            cleanTitle.isNotBlank() -> cleanTitle
-            else -> processedText
         }
-    }
 
-    private fun cleanText(text: String): String {
-        return text
-            .replace(Regex("[\\p{So}\\p{Sm}]"), "")  // hapus emoji/simbol
-            .replace("\n", ". ")
-            .replace("  ", " ")
-            .trim()
-    }
-
-    private fun formatCurrencyNatural(text: String): String {
-        // Ganti format Rp 50.000 menjadi "lima puluh ribu rupiah"
-        var result = text
-        val pattern = Pattern.compile("Rp[.\\s]?([\\d.,]+)")
-        val matcher = pattern.matcher(text)
-        while (matcher.find()) {
-            val numStr = matcher.group(1)?.replace(".", "")?.replace(",", "") ?: continue
-            val num = numStr.toLongOrNull() ?: continue
-            val spoken = numberToWords(num)
-            result = result.replace(matcher.group(0) ?: "", "$spoken rupiah")
-        }
-        return result
+        // Jika tidak ada nominal yang ditemukan, tidak membaca apapun
+        return ""
     }
 
     private fun numberToWords(n: Long): String {
@@ -195,7 +186,7 @@ class NotificationReaderService : NotificationListenerService() {
             "Layanan Pembaca Notifikasi",
             NotificationManager.IMPORTANCE_LOW
         )
-        channel.description = "Berjalan di latar belakang untuk membaca notifikasi"
+        channel.description = "Berjalan di latar belakang untuk membaca notifikasi GoPay Merchant"
         val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         nm.createNotificationChannel(channel)
     }
@@ -203,7 +194,7 @@ class NotificationReaderService : NotificationListenerService() {
     private fun buildForegroundNotification(): Notification {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Notifikasi Suara Aktif")
-            .setContentText("Memantau notifikasi GoPay Merchant...")
+            .setContentText("Memantau pembayaran GoPay Merchant...")
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
