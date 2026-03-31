@@ -20,14 +20,22 @@ jobs:
         distribution: 'temurin'
         cache: gradle
 
-    - name: Grant execute permission for gradlew
-      run: chmod +x gradlew
-
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
 
+    - name: Download gradle-wrapper.jar
+      run: |
+        mkdir -p gradle/wrapper
+        curl -L -o gradle/wrapper/gradle-wrapper.jar \
+          "https://github.com/gradle/gradle/raw/v8.4.0/gradle/wrapper/gradle-wrapper.jar"
+
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+
     - name: Build Debug APK
-      run: ./gradlew assembleDebug --stacktrace
+      run: ./gradlew assembleDebug --stacktrace --no-daemon
+      env:
+        GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx2g"
 
     - name: Upload APK sebagai Artifact
       uses: actions/upload-artifact@v4
@@ -46,7 +54,7 @@ jobs:
           APK Pembaca Notifikasi dengan TTS Natural
           - Mendukung GoPay Merchant
           - TTS Bahasa Indonesia natural
-          - Konversi Rp ke kata-kata (Rp 50.000 = lima puluh ribu rupiah)
+          - Konversi Rp ke kata-kata
         files: app/build/outputs/apk/debug/app-debug.apk
         draft: false
         prerelease: false
